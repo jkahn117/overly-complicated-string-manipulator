@@ -1,0 +1,19 @@
+@import "tailwindcss";
+
+[x-cloak] {
+  display: none !important;
+}
+
+@theme {
+  --color-surface: #ffffff;
+  --color-surface-alt: #f8fafc;
+  --color-border: #e2e8f0;
+  --color-text: #0f172a;
+  --color-text-muted: #64748b;
+  --color-primary: #3b82f6;
+  --color-primary-hover: #2563eb;
+  --color-danger: #ef4444;
+  --color-danger-hover: #dc2626;
+  --color-success: #22c55e;
+  --font-mono: "JetBrains Mono", "Fira Code", ui-monospace, monospace;
+}

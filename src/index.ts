@@ -4,6 +4,7 @@ import type { AppEnv, CustomStep, FlowDefinition, PipelineEnvelope, Tenant } fro
 import { FlowError } from "./types";
 import { getTenant } from "./middleware";
 import { adminRouter } from "./routes/admin";
+import { workersRouter } from "./routes/workers";
 import { generatePipelineWorkerCode, sanitizeBindingName } from "./codegen";
 
 // Re-export CustomProxy so it's available via ctx.exports
@@ -12,10 +13,18 @@ export { CustomProxy } from "./proxy";
 const app = new Hono<AppEnv>();
 
 // Middleware — tenant resolution (skipped for admin routes)
-app.use("*", except("/admin/*", getTenant));
+app.use("*", except("/admin/*", (c, next) => {
+	// Skip tenant resolution for GET requests to static assets.
+	// /workers routes need tenant resolution for all methods.
+	if (c.req.method === "GET" && !c.req.path.startsWith("/workers")) return next();
+	return getTenant(c, next);
+}));
 
 // Admin routes
 app.route("/admin", adminRouter);
+
+// Custom worker CRUD (requires tenant middleware)
+app.route("/workers", workersRouter);
 
 /** Parse "v<N>" -> N, defaulting to 0 for unexpected formats. */
 const parseVersion = (version: string): number => {
@@ -78,11 +87,12 @@ app.post("/", async (c) => {
   };
 
   // Inject a CustomProxy service binding per custom step
+  const tenantId = c.get("tenantId");
   const ctx = c.executionCtx as ExecutionContext;
   for (const step of customSteps) {
     const bindingKey = `CUSTOM_${sanitizeBindingName(step.workerName)}`;
     isolateEnv[bindingKey] = ctx.exports.CustomProxy({
-      props: { workerName: step.workerName, allowedWorkers },
+      props: { tenantId, workerName: step.workerName, allowedWorkers },
     });
   }
 
@@ -127,7 +137,20 @@ app.post("/", async (c) => {
     );
   }
 
-  return c.json(result);
+  const includeCode = c.req.query("include")?.split(",").includes("code");
+  const envelope: PipelineEnvelope = { ...result as PipelineEnvelope };
+  if (includeCode) {
+    envelope.generatedCode = pipelineCode;
+  }
+  return c.json(envelope);
+});
+
+// Static asset fallback (serves frontend via the ASSETS binding)
+app.get("*", async (c) => {
+	if (c.env.ASSETS) {
+		return c.env.ASSETS.fetch(c.req.raw);
+	}
+	return c.notFound();
 });
 
 // Global error handler

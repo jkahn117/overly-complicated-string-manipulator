@@ -7,10 +7,19 @@
 		"enabled": true,
 	},
 	"compatibility_flags": ["nodejs_compat"],
+	"assets": {
+		"directory": "./dist",
+		"binding": "ASSETS",
+		"run_worker_first": true,
+	},
+	"vars": {
+		"CF_ACCOUNT_ID": "9b453c382b0dcb55a9f87834b13d2883",
+		"CF_DISPATCH_NAMESPACE": "wfp-dynamics",
+	},
 	"dispatch_namespaces": [
 		{
 			"binding": "DISPATCHER",
-			"namespace": "production",
+			"namespace": "wfp-dynamics",
 		},
 	],
 	"kv_namespaces": [

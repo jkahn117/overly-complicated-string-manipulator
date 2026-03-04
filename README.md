@@ -1,50 +1,211 @@
 # Workers for Platforms — Dynamic Pipeline Execution
 
-## Project Overview
+A Cloudflare Workers demo that orchestrates tenant request processing through configurable pipelines, with a browser-based pipeline builder UI.
 
-A Cloudflare Workers for Platforms dispatch worker that orchestrates tenant request processing through configurable pipelines. It combines two execution models in a single isolate:
+Users build a pipeline of ordered transformation steps (built-in string operations and custom tenant Workers), execute it against the dispatch worker, and view step-by-step results alongside the generated isolate code.
 
-- **Built-in operations** — Platform-provided string manipulation functions, generated as inline JS and executed inside a Dynamic Worker Loader isolate.
-- **Custom tenant Workers** — Pre-deployed Workers in a dispatch namespace, called from within the isolate via `ctx.exports`-injected service bindings.
+## How It Works
 
-Each tenant defines a pipeline of ordered steps. The dispatch worker resolves the tenant, generates a single Worker module containing all steps, loads it via Worker Loader, and returns a JSON envelope with the final result and step-by-step history.
+This project combines two Cloudflare Workers primitives — **Worker Loader** and **Workers for Platforms (WfP)** — to run tenant-defined logic safely and dynamically, without redeploying the dispatch worker.
 
-## Architecture
+### Worker Loader: dynamic code generation
+
+The dispatch worker doesn't hardcode pipeline logic. Instead, on each execution request it:
+
+1. Reads the tenant's pipeline definition from KV (an ordered list of steps).
+2. **Generates a complete Worker module at runtime** (`codegen.ts`) — a valid ES module with a `fetch` handler that executes each step sequentially.
+3. Loads the generated code into a **Worker Loader isolate** via the `LOADER` binding. The isolate is keyed by `{tenantName}:{pipelineVersion}`, so unchanged pipelines reuse a cached isolate and config changes invalidate it automatically.
+
+Built-in steps (uppercase, trim, replace, etc.) compile to inline JavaScript inside the generated module. The isolate runs with `globalOutbound: null` — no raw internet access.
+
+### Workers for Platforms: custom tenant code
+
+Custom steps can't be inlined because they contain **tenant-authored code** that must run in its own isolated environment. The execution flow for a custom step is:
+
+1. When a tenant creates or updates a custom worker through the CRUD API, the code is saved to KV **and** deployed to a WfP **dispatch namespace** via the Cloudflare REST API. Script names are scoped per tenant (`{tenantId}--{workerName}`) to prevent collisions.
+
+2. At pipeline execution time, the dispatch worker creates a **`CustomProxy` WorkerEntrypoint** per custom step via `ctx.exports.CustomProxy()` and injects it into the isolate's `env` as a service binding (e.g. `env.CUSTOM_acme_step`).
+
+3. Inside the generated isolate code, a custom step calls `await env.CUSTOM_acme_step.transform(data)` — an **RPC call** to the proxy, not an HTTP request.
+
+4. The `CustomProxy` validates the worker name against the tenant's allowed list (cross-tenant isolation), then calls `DISPATCHER.get("{tenantId}--{workerName}")` to obtain the tenant's script from the dispatch namespace and forwards the input via `fetch()`.
 
 ```
-Request (POST with string body + x-tenant-id header)
+Isolate (generated code)
   |
+  | env.CUSTOM_xyz.transform(data)   ← RPC, not HTTP
   v
-Dispatch Worker (Hono)
-  |-- Middleware: resolve tenant from KV, validate status
-  |-- Generate pipeline Worker code (all steps in one module)
-  |-- Inject custom Worker bindings via ctx.exports.CustomProxy
-  |     (one service binding per custom step, scoped to allowed workerNames)
-  |-- env.LOADER.get(isolateId, callback) -> single isolate
+CustomProxy (WorkerEntrypoint)
   |
+  | DISPATCHER.get("tenant--xyz")    ← WfP dispatch namespace lookup
   v
-Single LOADER Isolate
-  |-- Step 0: builtin (inline JS, e.g. toUpperCase())
-  |-- Step 1: builtin (inline JS, e.g. replaceAll())
-  |-- Step 2: env.CUSTOM_acme_step.fetch(data) -> CustomProxy -> DISPATCHER
-  |-- Step 3: builtin (inline JS, e.g. trim())
-  |-- Returns JSON envelope { data, history }
+Tenant Worker (isolated)
   |
+  | fetch(POST, text/plain body)     ← HTTP (dispatch namespace stubs are Fetcher-based)
   v
-Response (JSON envelope with history)
+Response (text/plain) flows back up
+```
+
+The two execution models coexist in a single pipeline. A four-step pipeline might run steps 0, 1, and 3 as inline JS in the isolate, while step 2 calls out to the dispatch namespace through the proxy.
+
+### Request lifecycle
+
+```
+Browser → POST / (x-tenant-id header, text/plain body)
+  → Tenant middleware: resolve tenant config from KV
+  → codegen: generate Worker module from pipeline definition
+  → LOADER.get(): load (or reuse cached) isolate with generated code
+  → Inject CustomProxy service bindings into isolate env
+  → isolate.fetch(): run pipeline, each step transforms the string
+     ├── builtin steps: inline JS (toUpperCase, replaceAll, trim, ...)
+     └── custom steps: RPC → CustomProxy → DISPATCHER → tenant Worker
+  → Return JSON envelope { data, history, generatedCode? }
+```
+
+## Quick Start
+
+```sh
+pnpm install
+pnpm build:web   # build the frontend into dist/
+pnpm dev          # start wrangler dev on :8787
+```
+
+Open `http://localhost:8787` to use the pipeline builder.
+
+> **Note:** Custom steps that call the dispatch namespace will fail in local dev
+> (miniflare limitation). Built-in steps work fully offline.
+
+### Deploy
+
+Custom workers are deployed to the dispatch namespace via the Cloudflare REST API
+whenever they are created or updated through the CRUD routes. This requires three
+pieces of configuration:
+
+1. Set your account ID in `wrangler.jsonc` under `vars.CF_ACCOUNT_ID`
+2. Create an API token with **Workers Scripts:Edit** permission
+3. Add the token as a secret:
+
+```sh
+npx wrangler secret put CF_API_TOKEN
+```
+
+The dispatch namespace name (`CF_DISPATCH_NAMESPACE`) defaults to `wfp-dynamics`
+and is already set in `wrangler.jsonc`. Create the namespace in the dashboard or
+via the API before deploying:
+
+```sh
+curl -X POST "https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT_ID/workers/dispatch/namespaces" \
+  -H "Authorization: Bearer $CF_API_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "wfp-dynamics"}'
+```
+
+Then deploy:
+
+```sh
+pnpm deploy       # builds frontend + wrangler deploy
+```
+
+If `CF_ACCOUNT_ID` or `CF_API_TOKEN` are not set, the CRUD routes still work
+(code is saved to KV) but scripts are not deployed to the dispatch namespace,
+so custom pipeline steps will fail at execution time.
+
+### Run Tests
+
+```sh
+pnpm test         # 52 tests across 4 suites
+```
+
+## Project Structure
+
+```
+├── src/
+│   ├── index.ts           # Hono app: middleware, pipeline execution, asset fallback
+│   ├── types.ts           # PipelineEnvelope, Tenant, CustomWorkerRecord, FlowError
+│   ├── middleware.ts       # Tenant resolution from x-tenant-id header + KV
+│   ��── codegen.ts         # Generates pipeline Worker code (builtin + custom steps)
+│   ├── dispatch.ts        # WfP REST API client (deploy/delete scripts in dispatch namespace)
+│   ├── proxy.ts           # CustomProxy WorkerEntrypoint (RPC → dispatch namespace)
+│   └── routes/
+│       ├── admin.ts       # POST /admin/tenants (create tenant)
+│       └── workers.ts     # Custom worker CRUD (list, get, create, update, delete)
+├── web/                   # Frontend (Astro static site)
+│   ├── src/
+│   │   ├── pages/index.astro
+│   │   ├── layouts/Base.astro
+│   │   ├── components/    # Header, InputField, PipelineEditor, StepCard,
+│   │   │                  # RunButton, OutputPanel, Arrow
+│   │   ├── scripts/pipeline.ts   # Alpine.js store: state, API calls, worker CRUD
+│   │   └── styles/global.css     # Tailwind v4 + design tokens
+│   └── astro.config.mjs          # Static output to ../dist/
+├── test/
+│   ├── index.spec.ts      # Pipeline execution (13 tests)
+│   ├── admin.spec.ts      # Admin routes (6 tests)
+│   ├── workers.spec.ts    # Worker CRUD (16 tests)
+│   └── codegen.spec.ts    # Code generation (17 tests)
+├── wrangler.jsonc         # Bindings: KV, DISPATCHER, LOADER, ASSETS
+├── pnpm-workspace.yaml    # Workspace: root + web/
+└── package.json           # Scripts: dev, build:web, deploy, test
 ```
 
 ## Bindings
 
 | Binding | Type | Purpose |
 |---------|------|---------|
-| `TENANTS` | KV Namespace | Stores tenant config (pipeline definition, status) |
-| `DISPATCHER` | Dispatch Namespace | Routes to pre-deployed custom tenant Workers |
+| `TENANTS` | KV Namespace | Tenant config + custom worker code storage |
+| `DISPATCHER` | Dispatch Namespace | Routes to custom tenant Workers at runtime |
 | `LOADER` | Worker Loader | Loads dynamically generated pipeline isolates |
+| `ASSETS` | Assets | Serves the static frontend (with `run_worker_first: true`) |
+
+### Environment Variables
+
+| Variable | Type | Purpose |
+|----------|------|---------|
+| `CF_ACCOUNT_ID` | var | Cloudflare account ID (set in `wrangler.jsonc`) |
+| `CF_DISPATCH_NAMESPACE` | var | Dispatch namespace name (default: `wfp-dynamics`) |
+| `CF_API_TOKEN` | secret | API token with Workers Scripts:Edit permission |
+
+## API
+
+All API routes (except `/admin/*`) require the `x-tenant-id` header.
+
+### Pipeline Execution
+
+**`POST /`** — Execute the tenant's saved pipeline.
+
+- Body: `text/plain` (input string)
+- Query: `?include=code` to include generated isolate source in response
+- Response: JSON envelope with `data`, `history`, and optionally `generatedCode`
+
+**`PUT /pipeline`** — Save/update the tenant's pipeline definition.
+
+- Body: `{ "pipeline": { "steps": [...] } }`
+- Response: `{ "tenantId", "name", "pipelineVersion" }`
+
+### Tenant Management
+
+**`POST /admin/tenants`** — Create a new tenant.
+
+- Body: `{ "name", "pipeline", "tenantId?" }`
+- The optional `tenantId` field lets the caller choose the ID (used by the frontend's auto-create-on-first-run flow).
+
+### Custom Worker CRUD
+
+All routes under `/workers` are scoped to the current tenant.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/workers` | List all custom workers (name + updatedAt) |
+| `GET` | `/workers/:name` | Get worker details including code |
+| `POST` | `/workers` | Create a worker (`{ "name", "code?" }`) |
+| `PUT` | `/workers/:name` | Update worker code (`{ "code" }`) |
+| `DELETE` | `/workers/:name` | Delete a worker |
+
+Create and update are **synchronous** — the response is not sent until the worker is deployed to the dispatch namespace, so the pipeline can execute against the latest code immediately. If the deploy fails, the KV write still succeeds and the response includes a `warning` field.
 
 ## Tenant Configuration
 
-Tenant config is stored in KV, keyed by tenant ID.
+Stored in KV, keyed by tenant ID:
 
 ```json
 {
@@ -62,43 +223,54 @@ Tenant config is stored in KV, keyed by tenant ID.
 }
 ```
 
-### Step Types
-
-**`builtin`** — Platform-provided operations. The `op` field selects the operation. Some operations accept a `config` object.
+### Built-in Operations
 
 | Operation | Description | Config |
 |-----------|-------------|--------|
-| `uppercase` | Convert string to uppercase | -- |
-| `lowercase` | Convert string to lowercase | -- |
+| `uppercase` | Convert to uppercase | -- |
+| `lowercase` | Convert to lowercase | -- |
 | `trim` | Remove leading/trailing whitespace | -- |
-| `replace` | Find and replace substring | `{ "find": string, "replace": string }` |
-| `prefix` | Prepend a string | `{ "value": string }` |
-| `suffix` | Append a string | `{ "value": string }` |
+| `replace` | Find and replace substring | `{ "find", "replace" }` |
+| `prefix` | Prepend a string | `{ "value" }` |
+| `suffix` | Append a string | `{ "value" }` |
 
-**`custom`** — Tenant-deployed Worker in the dispatch namespace. The `workerName` field identifies which Worker to invoke.
+### Custom Worker Contract
 
-### Custom Tenant Worker Contract
+Custom workers are tenant-authored JavaScript modules deployed to the dispatch namespace:
 
-- Receives: `POST` request with `text/plain` body (the current pipeline string)
-- Returns: `200` response with `text/plain` body (the transformed string)
-- No auth required (dispatch worker handles that)
-- Runs in untrusted mode (dispatch namespace isolation)
-- Deployed to the dispatch namespace via the Cloudflare REST API (not wrangler)
-
-## Execution Flow
-
-Given the sample config above and a request body of `"  hello foo  "`:
-
-```
-Input:  "  hello foo  "
-  Step 0 [builtin:uppercase]              -> "  HELLO FOO  "
-  Step 1 [builtin:replace FOO->BAR]       -> "  HELLO BAR  "
-  Step 2 [custom:acme-custom-step]        -> "  HELLO BAR!!!"
-  Step 3 [builtin:trim]                   -> "HELLO BAR!!!"
-Output: "HELLO BAR!!!"
+```js
+export default {
+  async fetch(request) {
+    const input = await request.text();
+    const output = input.toUpperCase() + "!!!";
+    return new Response(output);
+  }
+};
 ```
 
-### Response Format
+- Receives: `POST` with `text/plain` body
+- Returns: `text/plain` body (transformed string)
+- Runs in the dispatch namespace (untrusted, isolated per-request)
+
+## Frontend
+
+The UI is a single-page Astro static site using Alpine.js for reactivity and Tailwind CSS v4 for styling. It builds to `dist/` and is served by the worker via the `ASSETS` binding.
+
+### Features
+
+- **Tenant selector** — Text input synced to `?tenant=` URL param, defaults to "playground". Auto-creates the tenant on first use if it doesn't exist.
+- **Pipeline builder** — Add/remove/reorder built-in and custom steps. Built-in steps show blue badges; custom steps show amber badges. Steps with config (replace, prefix, suffix) show inline config fields.
+- **Custom worker editor** — Create, edit, and delete custom workers with an inline code editor. Shows deploying/saving/deleting progress with spinners. Surfaces deploy warnings and success confirmations.
+- **Run** — Saves the pipeline, executes it, and displays the result. Ctrl/Cmd+Enter keyboard shortcut.
+- **Output panel** — Tabbed view showing the final result with step-by-step history, and a "Generated Code" tab with the isolate source and a copy button.
+
+### Tech Stack
+
+- [Astro](https://astro.build/) — Static site generator (output mode: `static`)
+- [Alpine.js](https://alpinejs.dev/) ��� Lightweight reactivity (installed via pnpm, not CDN)
+- [Tailwind CSS v4](https://tailwindcss.com/) — Utility-first CSS via `@tailwindcss/vite`
+
+## Response Format
 
 **Success (200):**
 
@@ -110,7 +282,8 @@ Output: "HELLO BAR!!!"
     { "step": 1, "type": "builtin", "op": "replace", "input": "  HELLO FOO  ", "output": "  HELLO BAR  " },
     { "step": 2, "type": "custom", "op": "acme-custom-step", "input": "  HELLO BAR  ", "output": "  HELLO BAR!!!" },
     { "step": 3, "type": "builtin", "op": "trim", "input": "  HELLO BAR!!!", "output": "HELLO BAR!!!" }
-  ]
+  ],
+  "generatedCode": "..."
 }
 ```
 
@@ -118,7 +291,7 @@ Output: "HELLO BAR!!!"
 
 ```json
 {
-  "error": "Pipeline failed at step 2 (custom:acme-custom-step): Custom worker returned status 500",
+  "error": "Custom worker \"acme-custom-step\" returned status 500",
   "step": 2,
   "op": "custom:acme-custom-step",
   "history": [
@@ -130,56 +303,24 @@ Output: "HELLO BAR!!!"
 
 Errors include partial history (steps completed before failure).
 
-## CustomProxy and Cross-Tenant Isolation
-
-Custom pipeline steps call tenant Workers through a `CustomProxy` WorkerEntrypoint exported from the dispatch worker. The proxy is injected into each isolate as a service binding via `ctx.exports`.
-
-Each `CustomProxy` instance receives:
-- `workerName` — which tenant Worker to dispatch to
-- `allowedWorkers` — list of worker names the current tenant is authorized to call
-
-Before dispatching, `CustomProxy` validates that `workerName` is in `allowedWorkers`. This prevents a tenant's pipeline config from invoking another tenant's Workers.
-
-## How Tenants Supply Custom Workers
-
-Tenants do not deploy Workers directly. The platform's control plane deploys on their behalf using the Cloudflare REST API:
-
-```sh
-curl -X PUT \
-  "https://api.cloudflare.com/client/v4/accounts/<account-id>/workers/dispatch/namespaces/production/scripts/acme-custom-step" \
-  -H "Authorization: Bearer <api-token>" \
-  -H "Content-Type: multipart/form-data" \
-  -F 'metadata={"main_module":"worker.js","compatibility_date":"2026-02-27"}' \
-  -F 'worker.js=@/path/to/tenant-code.js'
-```
-
-A minimal tenant Worker:
-
-```js
-export default {
-  async fetch(request) {
-    const input = await request.text();
-    return new Response(input + "!!!");
-  }
-};
-```
-
 ## Design Decisions
 
-1. **Single isolate per pipeline** — All steps (builtin + custom) run in one Worker Loader isolate. Built-in ops are inline JS. Custom steps call back to the dispatch worker via `ctx.exports`-injected service bindings. This avoids per-step isolate creation overhead.
+1. **Single isolate per pipeline** — All steps run in one Worker Loader isolate. Built-in ops are inline JS; custom steps call back via `ctx.exports`-injected service bindings. Avoids per-step isolate overhead.
 
-2. **String-in, string-out contract** — Every step takes a plain string as input and returns a plain string. The JSON envelope with history is assembled by the generated pipeline code, not by individual steps.
+2. **String-in, string-out** — Every step takes a plain string and returns a plain string. The JSON envelope is assembled by the generated pipeline code, not by individual steps.
 
-3. **Custom ops via ctx.exports proxy** — Tenant Workers are called through a `CustomProxy` WorkerEntrypoint, not directly from the isolate. This allows cross-tenant validation and keeps `globalOutbound: null` (no raw internet access from the isolate).
+3. **RPC between isolate and proxy** — The isolate calls `CustomProxy.transform(data)` via RPC (not HTTP). Only the proxy-to-tenant hop uses `fetch()` because dispatch namespace stubs are Fetcher-based. This keeps serialization overhead minimal for the internal hop.
 
-4. **Cross-tenant isolation** — `CustomProxy` validates worker names against an allowed list before dispatching. Tenants cannot invoke other tenants' Workers.
+4. **CustomProxy for tenant isolation** — Tenant Workers are called through a `CustomProxy` WorkerEntrypoint, not directly from the isolate. The proxy validates worker names against an allowed list, preventing cross-tenant invocation. The isolate runs with `globalOutbound: null` (no raw internet access).
 
-5. **Pipeline short-circuits on error** — If any step fails, the pipeline stops and returns an error response with partial history. Each step in the generated code is wrapped in its own try/catch for precise error reporting.
+5. **Synchronous dispatch deploy** — Worker create/update routes `await` the dispatch namespace deployment before responding. This prevents a race condition where the frontend runs the pipeline before the updated code is live.
 
-6. **Tenant config in KV** — Pipeline definitions live in KV for low-latency reads at the edge. Config changes take effect on next request (no redeploy needed for flow changes).
+6. **Assets + API coexistence** — `run_worker_first: true` sends all requests to the worker first. API routes are handled by Hono; unmatched GET requests fall through to `env.ASSETS.fetch()` for static files.
 
-7. **Isolate caching by version** — Isolate ID is `tenantName:pipelineVersion`. Unchanged pipelines reuse cached isolates. Bumping `pipelineVersion` in KV invalidates the cache.
+7. **KV for everything** — Tenant config and custom worker code share the same KV namespace. Worker keys use `{tenantId}:worker:{name}` with metadata for cheap listing without fetching values.
 
-8. **Routing by header** — Tenant identity comes from the `x-tenant-id` request header. Suitable for API-first platforms. Could be extended to hostname or path-based routing.
+8. **Isolate caching by version** — Isolate ID is `tenantName:pipelineVersion`. Unchanged pipelines reuse cached isolates. Saving a pipeline bumps the version, invalidating the cache.
 
-9. **Middleware-only disabled check** — Middleware rejects disabled tenants with 403. No redundant checks in route handlers.
+9. **Auto-create tenant** — The frontend auto-creates the tenant on first use by probing `GET /workers` and calling `POST /admin/tenants` on 404. No manual setup required.
+
+10. **Pipeline short-circuits on error** — If any step fails, the pipeline stops and returns partial history. Each step is wrapped in its own try/catch for precise error attribution.

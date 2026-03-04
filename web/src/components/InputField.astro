@@ -1,0 +1,19 @@
+---
+---
+
+<section class="rounded-lg border border-border bg-surface p-4 shadow-sm">
+  <label for="pipeline-input" class="mb-2 block text-sm font-medium text-text">
+    Input Text
+  </label>
+  <input
+    id="pipeline-input"
+    type="text"
+    x-model="$store.pipeline.input"
+    maxlength="200"
+    placeholder="Enter your input text..."
+    class="w-full rounded-md border border-border bg-surface-alt px-3 py-2 font-mono text-sm text-text placeholder:text-text-muted focus:border-primary focus:ring-1 focus:ring-primary focus:outline-none"
+  />
+  <p class="mt-1 text-right text-xs text-text-muted">
+    <span x-text="$store.pipeline.input.length"></span>/200
+  </p>
+</section>

@@ -1,0 +1,22 @@
+---
+import Base from "../layouts/Base.astro";
+import Header from "../components/Header.astro";
+import InputField from "../components/InputField.astro";
+import Arrow from "../components/Arrow.astro";
+import PipelineEditor from "../components/PipelineEditor.astro";
+import OutputPanel from "../components/OutputPanel.astro";
+import RunButton from "../components/RunButton.astro";
+---
+
+<Base title="Overly complicated string manipulator">
+  <Header slot="header" />
+  <InputField />
+  <Arrow />
+  <PipelineEditor />
+  <RunButton />
+  <Arrow />
+  <OutputPanel />
+
+  <!-- Keyboard shortcut: Ctrl+Enter to run -->
+  <div x-on:keydown.window="if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') $store.pipeline.run()"></div>
+</Base>

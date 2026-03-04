@@ -1,0 +1,313 @@
+---
+import StepCard from "./StepCard.astro";
+---
+
+<section
+  x-data="{ tab: 'pipeline', newWorkerName: '' }"
+  x-init="$store.pipeline.loadWorkers()"
+  class="rounded-lg border border-border bg-surface shadow-sm"
+>
+  <!-- Tab bar -->
+  <div class="flex border-b border-border">
+    <button
+      type="button"
+      x-on:click="tab = 'pipeline'; $store.pipeline.loadWorkers()"
+      x-bind:class="tab === 'pipeline' ? 'border-primary text-primary' : 'border-transparent text-text-muted hover:text-text'"
+      class="border-b-2 px-4 py-2 text-xs font-medium transition-colors"
+    >
+      Pipeline Steps
+    </button>
+    <button
+      type="button"
+      x-on:click="tab = 'workers'; $store.pipeline.loadWorkers()"
+      x-bind:class="tab === 'workers' ? 'border-primary text-primary' : 'border-transparent text-text-muted hover:text-text'"
+      class="border-b-2 px-4 py-2 text-xs font-medium transition-colors"
+    >
+      Custom Workers
+      <span
+        x-show="$store.pipeline.customWorkers.length > 0"
+        x-text="$store.pipeline.customWorkers.length"
+        class="ml-1 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-amber-100 px-1 text-[10px] font-bold text-amber-700"
+      ></span>
+    </button>
+  </div>
+
+  <div class="p-4">
+    <!-- ===== Pipeline Steps tab ===== -->
+    <div x-show="tab === 'pipeline'">
+      <!-- Step list -->
+      <div class="space-y-2">
+        <template x-for="(step, index) in $store.pipeline.steps" :key="step.id">
+          <StepCard />
+        </template>
+      </div>
+
+      <!-- Empty state -->
+      <p
+        x-show="$store.pipeline.steps.length === 0"
+        class="py-6 text-center text-sm text-text-muted"
+      >
+        No steps added. Add a built-in or custom step to begin.
+      </p>
+
+      <!-- Add step buttons -->
+      <div class="mt-3 flex flex-wrap gap-2">
+        <!-- Add builtin step -->
+        <div x-data="{ open: false }" class="relative">
+          <button
+            type="button"
+            x-on:click="open = !open"
+            class="inline-flex items-center gap-1.5 rounded-md border border-border bg-surface px-3 py-1.5 text-sm font-medium text-text hover:bg-surface-alt"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="12" y1="5" x2="12" y2="19"></line>
+              <line x1="5" y1="12" x2="19" y2="12"></line>
+            </svg>
+            Built-in
+            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="6 9 12 15 18 9"></polyline>
+            </svg>
+          </button>
+
+          <div
+            x-show="open"
+            x-on:click.outside="open = false"
+            x-transition:enter="transition ease-out duration-100"
+            x-transition:enter-start="opacity-0 scale-95"
+            x-transition:enter-end="opacity-100 scale-100"
+            x-transition:leave="transition ease-in duration-75"
+            x-transition:leave-start="opacity-100 scale-100"
+            x-transition:leave-end="opacity-0 scale-95"
+            x-cloak
+            class="absolute left-0 z-10 mt-1 w-48 rounded-md border border-border bg-surface py-1 shadow-lg"
+          >
+            <button type="button" x-on:click="$store.pipeline.addStep('uppercase'); open = false" class="block w-full px-3 py-1.5 text-left font-mono text-sm text-text hover:bg-surface-alt">uppercase</button>
+            <button type="button" x-on:click="$store.pipeline.addStep('lowercase'); open = false" class="block w-full px-3 py-1.5 text-left font-mono text-sm text-text hover:bg-surface-alt">lowercase</button>
+            <button type="button" x-on:click="$store.pipeline.addStep('trim'); open = false" class="block w-full px-3 py-1.5 text-left font-mono text-sm text-text hover:bg-surface-alt">trim</button>
+            <hr class="my-1 border-border" />
+            <button type="button" x-on:click="$store.pipeline.addStep('replace'); open = false" class="block w-full px-3 py-1.5 text-left font-mono text-sm text-text hover:bg-surface-alt">replace <span class="text-text-muted">(find/replace)</span></button>
+            <button type="button" x-on:click="$store.pipeline.addStep('prefix'); open = false" class="block w-full px-3 py-1.5 text-left font-mono text-sm text-text hover:bg-surface-alt">prefix <span class="text-text-muted">(value)</span></button>
+            <button type="button" x-on:click="$store.pipeline.addStep('suffix'); open = false" class="block w-full px-3 py-1.5 text-left font-mono text-sm text-text hover:bg-surface-alt">suffix <span class="text-text-muted">(value)</span></button>
+          </div>
+        </div>
+
+        <!-- Add custom step -->
+        <div x-data="{ open: false }" class="relative">
+          <button
+            type="button"
+            x-on:click="open = !open; if (open) $store.pipeline.loadWorkers()"
+            x-bind:disabled="$store.pipeline.customWorkers.length === 0"
+            class="inline-flex items-center gap-1.5 rounded-md border border-amber-200 bg-amber-50 px-3 py-1.5 text-sm font-medium text-amber-800 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="12" y1="5" x2="12" y2="19"></line>
+              <line x1="5" y1="12" x2="19" y2="12"></line>
+            </svg>
+            Custom
+            <span
+              x-show="$store.pipeline.customWorkers.length > 0"
+              x-text="$store.pipeline.customWorkers.length"
+              class="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-amber-200 px-1 text-[10px] font-bold text-amber-800"
+            ></span>
+            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="6 9 12 15 18 9"></polyline>
+            </svg>
+          </button>
+
+          <div
+            x-show="open"
+            x-on:click.outside="open = false"
+            x-transition:enter="transition ease-out duration-100"
+            x-transition:enter-start="opacity-0 scale-95"
+            x-transition:enter-end="opacity-100 scale-100"
+            x-transition:leave="transition ease-in duration-75"
+            x-transition:leave-start="opacity-100 scale-100"
+            x-transition:leave-end="opacity-0 scale-95"
+            x-cloak
+            class="absolute left-0 z-10 mt-1 w-56 rounded-md border border-border bg-surface py-1 shadow-lg"
+          >
+            <template x-for="w in $store.pipeline.customWorkers" :key="w.name">
+              <button
+                type="button"
+                x-on:click="$store.pipeline.addCustomStep(w.name); open = false"
+                class="block w-full px-3 py-1.5 text-left font-mono text-sm text-text hover:bg-surface-alt"
+                x-text="w.name"
+              ></button>
+            </template>
+            <template x-if="$store.pipeline.customWorkers.length === 0">
+              <p class="px-3 py-2 text-xs text-text-muted">No custom workers yet.</p>
+            </template>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== Custom Workers tab ===== -->
+    <div x-show="tab === 'workers'" x-cloak>
+
+      <!-- Worker editor (shown when editing) -->
+      <template x-if="$store.pipeline.editingWorker">
+        <div>
+          <div class="mb-3 flex items-center justify-between">
+            <h3 class="flex items-center gap-2 text-sm font-medium text-text">
+              <span class="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700">editing</span>
+              <span class="font-mono" x-text="$store.pipeline.editingWorker.name"></span>
+            </h3>
+            <button
+              type="button"
+              x-on:click="$store.pipeline.closeEditor()"
+              class="rounded p-1 text-text-muted hover:text-text"
+              title="Close editor"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="18" y1="6" x2="6" y2="18"></line>
+                <line x1="6" y1="6" x2="18" y2="18"></line>
+              </svg>
+            </button>
+          </div>
+
+          <!-- Contract hint -->
+          <div class="mb-3 rounded border border-border bg-surface-alt px-3 py-2 text-xs text-text-muted">
+            <p class="font-medium text-text">Expected interface:</p>
+            <p class="mt-1 font-mono">POST request with text/plain body &rarr; text/plain response</p>
+            <p class="mt-0.5 font-mono">input: string &rarr; output: string</p>
+          </div>
+
+          <!-- Code editor -->
+          <textarea
+            x-model="$store.pipeline.editingWorker.code"
+            spellcheck="false"
+            class="h-64 w-full resize-y rounded-md border border-border bg-slate-900 p-3 font-mono text-xs leading-relaxed text-slate-100 focus:border-primary focus:ring-1 focus:ring-primary focus:outline-none"
+          ></textarea>
+
+          <!-- Error message -->
+          <p
+            x-show="$store.pipeline.workerError"
+            x-text="$store.pipeline.workerError"
+            class="mt-2 text-xs text-danger"
+          ></p>
+
+          <!-- Success message -->
+          <p
+            x-show="$store.pipeline.workerSaveSuccess"
+            x-transition:leave="transition ease-in duration-300"
+            x-transition:leave-start="opacity-100"
+            x-transition:leave-end="opacity-0"
+            class="mt-2 text-xs font-medium text-green-600"
+          >
+            Deployed successfully
+          </p>
+
+          <!-- Save / close buttons -->
+          <div class="mt-3 flex items-center gap-2">
+            <button
+              type="button"
+              x-on:click="$store.pipeline.saveWorker()"
+              x-bind:disabled="$store.pipeline.workerSaving"
+              class="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-white hover:bg-primary-hover disabled:opacity-50"
+            >
+              <svg x-show="$store.pipeline.workerSaving" x-cloak class="h-3.5 w-3.5 animate-spin" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+              <svg x-show="$store.pipeline.workerSaveSuccess && !$store.pipeline.workerSaving" x-cloak xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-green-200"><polyline points="20 6 9 17 4 12"></polyline></svg>
+              <span x-text="$store.pipeline.workerSaving ? 'Saving & deploying...' : $store.pipeline.workerSaveSuccess ? 'Deployed!' : 'Save & deploy'"></span>
+            </button>
+            <button
+              type="button"
+              x-on:click="$store.pipeline.closeEditor()"
+              class="rounded-md border border-border px-3 py-1.5 text-sm font-medium text-text hover:bg-surface-alt"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      </template>
+
+      <!-- Worker list (shown when not editing) -->
+      <template x-if="!$store.pipeline.editingWorker">
+        <div>
+          <!-- Loading -->
+          <div x-show="$store.pipeline.workersLoading" class="flex items-center justify-center gap-2 py-6 text-sm text-text-muted">
+            <svg class="h-4 w-4 animate-spin" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+            Loading...
+          </div>
+
+          <!-- Worker list -->
+          <div x-show="!$store.pipeline.workersLoading" class="space-y-2">
+            <template x-for="w in $store.pipeline.customWorkers" :key="w.name">
+              <div class="flex items-center justify-between rounded-md border border-border bg-surface-alt px-3 py-2">
+                <div>
+                  <span class="font-mono text-sm font-semibold text-text" x-text="w.name"></span>
+                  <span
+                    x-show="w.updatedAt"
+                    class="ml-2 text-[10px] text-text-muted"
+                    x-text="w.updatedAt ? 'updated ' + new Date(w.updatedAt).toLocaleDateString() : ''"
+                  ></span>
+                </div>
+                <div class="flex items-center gap-1">
+                  <button
+                    type="button"
+                    x-on:click="$store.pipeline.editWorker(w.name)"
+                    x-bind:disabled="$store.pipeline.workerDeleting === w.name"
+                    class="rounded px-2 py-1 text-xs font-medium text-primary hover:bg-primary/10 disabled:opacity-40"
+                  >
+                    Edit
+                  </button>
+                  <button
+                    type="button"
+                    x-on:click="if (confirm('Delete worker ' + w.name + '?')) $store.pipeline.deleteWorker(w.name)"
+                    x-bind:disabled="$store.pipeline.workerDeleting !== null"
+                    class="inline-flex items-center gap-1 rounded px-2 py-1 text-xs font-medium text-danger hover:bg-danger/10 disabled:opacity-40"
+                  >
+                    <svg x-show="$store.pipeline.workerDeleting === w.name" x-cloak class="h-3 w-3 animate-spin" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                    <span x-text="$store.pipeline.workerDeleting === w.name ? 'Deleting...' : 'Delete'"></span>
+                  </button>
+                </div>
+              </div>
+            </template>
+          </div>
+
+          <!-- Empty state -->
+          <p
+            x-show="!$store.pipeline.workersLoading && $store.pipeline.customWorkers.length === 0"
+            class="py-6 text-center text-sm text-text-muted"
+          >
+            No custom workers yet. Create one below.
+          </p>
+
+          <!-- Error -->
+          <p
+            x-show="$store.pipeline.workerError"
+            x-text="$store.pipeline.workerError"
+            class="mt-2 text-xs text-danger"
+          ></p>
+
+          <!-- Create new worker -->
+          <div class="mt-3 flex items-center gap-2">
+            <input
+              type="text"
+              x-model="newWorkerName"
+              placeholder="worker-name"
+              maxlength="64"
+              x-bind:disabled="$store.pipeline.workerCreating"
+              x-on:keydown.enter="if (newWorkerName.trim() && !$store.pipeline.workerCreating) { $store.pipeline.createWorker(newWorkerName.trim()); newWorkerName = ''; }"
+              class="flex-1 rounded-md border border-border bg-surface-alt px-2.5 py-1.5 font-mono text-sm text-text placeholder:text-text-muted focus:border-primary focus:ring-1 focus:ring-primary focus:outline-none disabled:opacity-50"
+            />
+            <button
+              type="button"
+              x-on:click="if (newWorkerName.trim()) { $store.pipeline.createWorker(newWorkerName.trim()); newWorkerName = ''; }"
+              x-bind:disabled="!newWorkerName.trim() || $store.pipeline.workerCreating"
+              class="inline-flex items-center gap-1.5 rounded-md bg-amber-500 px-3 py-1.5 text-sm font-medium text-white hover:bg-amber-600 disabled:opacity-40"
+            >
+              <svg x-show="!$store.pipeline.workerCreating" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="12" y1="5" x2="12" y2="19"></line>
+                <line x1="5" y1="12" x2="19" y2="12"></line>
+              </svg>
+              <svg x-show="$store.pipeline.workerCreating" x-cloak class="h-3.5 w-3.5 animate-spin" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+              <span x-text="$store.pipeline.workerCreating ? 'Deploying...' : 'Create'"></span>
+            </button>
+          </div>
+        </div>
+      </template>
+
+    </div>
+  </div>
+</section>

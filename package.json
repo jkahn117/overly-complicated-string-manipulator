@@ -3,7 +3,9 @@
 	"version": "0.0.0",
 	"private": true,
 	"scripts": {
-		"deploy": "wrangler deploy",
+		"build:web": "pnpm --filter web build",
+		"dev:web": "pnpm --filter web build --watch",
+		"deploy": "pnpm build:web && wrangler deploy",
 		"dev": "wrangler dev",
 		"start": "wrangler dev",
 		"test": "vitest",

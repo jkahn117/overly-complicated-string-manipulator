@@ -1,0 +1,19 @@
+{
+  "name": "web",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview"
+  },
+  "dependencies": {
+    "alpinejs": "^3.14.9",
+    "astro": "^5.7.13"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.1.7",
+    "@types/alpinejs": "^3.13.11",
+    "tailwindcss": "^4.1.7"
+  }
+}

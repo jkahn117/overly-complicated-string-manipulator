@@ -158,6 +158,9 @@ dist
 .yarn/install-state.gz
 .pnp.\*
 
+# Astro
+web/.astro/
+
 # wrangler project
 
 .dev.vars*

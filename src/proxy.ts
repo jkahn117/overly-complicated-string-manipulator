@@ -1,6 +1,7 @@
 import { WorkerEntrypoint } from "cloudflare:workers";
 
 type CustomProxyProps = {
+  tenantId: string;
   workerName: string;
   allowedWorkers: string[];
 };
@@ -21,7 +22,7 @@ type CustomProxyProps = {
  */
 export class CustomProxy extends WorkerEntrypoint {
   async transform(input: string): Promise<string> {
-    const { workerName, allowedWorkers } =
+    const { tenantId, workerName, allowedWorkers } =
       this.ctx.props as CustomProxyProps;
 
     if (!allowedWorkers.includes(workerName)) {
@@ -30,7 +31,10 @@ export class CustomProxy extends WorkerEntrypoint {
       );
     }
 
-    const worker = this.env.DISPATCHER.get(workerName);
+    // Script names in the dispatch namespace are scoped per tenant
+    // to avoid collisions (e.g. two tenants both naming a worker "reverse").
+    const scriptName = `${tenantId}--${workerName}`;
+    const worker = this.env.DISPATCHER.get(scriptName);
     const response = await worker.fetch("http://internal/", {
       method: "POST",
       body: input,

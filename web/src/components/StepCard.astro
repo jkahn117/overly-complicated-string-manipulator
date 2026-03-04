@@ -1,0 +1,103 @@
+---
+/**
+ * StepCard is rendered inside an Alpine x-for loop.
+ * It expects these Alpine scope variables:
+ *   - step: Step object { id, type, op?, workerName?, config? }
+ *   - index: number (step index)
+ */
+---
+
+<div class="group flex items-start gap-3 rounded-md border border-border bg-surface px-3 py-2.5">
+  <!-- Step number -->
+  <span
+    class="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold text-white"
+    x-bind:class="step.type === 'custom' ? 'bg-amber-500' : 'bg-primary'"
+    x-text="index + 1"
+  ></span>
+
+  <div class="min-w-0 flex-1">
+    <!-- Op name -->
+    <div class="flex items-center gap-2">
+      <template x-if="step.type === 'builtin'">
+        <span class="font-mono text-sm font-semibold text-text" x-text="step.op"></span>
+      </template>
+      <template x-if="step.type === 'custom'">
+        <span class="flex items-center gap-1.5">
+          <span class="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700">custom</span>
+          <span class="font-mono text-sm font-semibold text-text" x-text="step.workerName"></span>
+        </span>
+      </template>
+    </div>
+
+    <!-- Config fields for builtin ops (replace, prefix, suffix) -->
+    <template x-if="step.type === 'builtin' && step.op === 'replace'">
+      <div class="mt-2 grid grid-cols-2 gap-2">
+        <input
+          type="text"
+          placeholder="find"
+          x-model="step.config.find"
+          class="rounded border border-border bg-surface-alt px-2 py-1 font-mono text-xs text-text placeholder:text-text-muted focus:border-primary focus:ring-1 focus:ring-primary focus:outline-none"
+        />
+        <input
+          type="text"
+          placeholder="replace"
+          x-model="step.config.replace"
+          class="rounded border border-border bg-surface-alt px-2 py-1 font-mono text-xs text-text placeholder:text-text-muted focus:border-primary focus:ring-1 focus:ring-primary focus:outline-none"
+        />
+      </div>
+    </template>
+
+    <template x-if="step.type === 'builtin' && (step.op === 'prefix' || step.op === 'suffix')">
+      <div class="mt-2">
+        <input
+          type="text"
+          placeholder="value"
+          x-model="step.config.value"
+          class="w-full rounded border border-border bg-surface-alt px-2 py-1 font-mono text-xs text-text placeholder:text-text-muted focus:border-primary focus:ring-1 focus:ring-primary focus:outline-none"
+        />
+      </div>
+    </template>
+
+    <!-- Custom step: input/output contract hint -->
+    <template x-if="step.type === 'custom'">
+      <p class="mt-1 text-[11px] text-text-muted">string in &rarr; string out</p>
+    </template>
+  </div>
+
+  <!-- Actions: move up, move down, remove -->
+  <div class="flex shrink-0 items-center gap-1">
+    <button
+      type="button"
+      x-show="index > 0"
+      x-on:click="$store.pipeline.moveStep(index, -1)"
+      class="rounded p-0.5 text-text-muted hover:text-text"
+      title="Move up"
+    >
+      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="18 15 12 9 6 15"></polyline>
+      </svg>
+    </button>
+    <button
+      type="button"
+      x-show="index < $store.pipeline.steps.length - 1"
+      x-on:click="$store.pipeline.moveStep(index, 1)"
+      class="rounded p-0.5 text-text-muted hover:text-text"
+      title="Move down"
+    >
+      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="6 9 12 15 18 9"></polyline>
+      </svg>
+    </button>
+    <button
+      type="button"
+      x-on:click="$store.pipeline.removeStep(step.id)"
+      class="rounded p-0.5 text-text-muted hover:text-danger"
+      title="Remove step"
+    >
+      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="18" y1="6" x2="6" y2="18"></line>
+        <line x1="6" y1="6" x2="18" y2="18"></line>
+      </svg>
+    </button>
+  </div>
+</div>

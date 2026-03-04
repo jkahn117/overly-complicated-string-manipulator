@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import type { AppEnv, FlowDefinition } from "../types";
 
 type CreateTenantRequest = {
+  tenantId?: string;
   name: string;
   pipeline: FlowDefinition;
 };
@@ -30,7 +31,7 @@ adminRouter.post("/tenants", async (c) => {
     return c.json({ error: "Missing pipeline definition" }, 400);
   }
 
-  const tenantId = generateTenantId();
+  const tenantId = body.tenantId || generateTenantId();
   await c.env.TENANTS.put(
     tenantId,
     JSON.stringify({
