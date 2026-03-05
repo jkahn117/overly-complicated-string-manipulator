@@ -33,6 +33,12 @@
 			"binding": "LOADER",
 		},
 	],
+	"r2_buckets": [
+		{
+			"binding": "USAGE_METRICS",
+			"bucket_name": "wfp-usage-metrics",
+		},
+	],
 	"pipelines": [
 		{
 			"pipeline": "f63112ac46b447668126647eeacefb22",

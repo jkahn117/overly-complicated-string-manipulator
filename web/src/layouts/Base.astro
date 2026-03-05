@@ -1,9 +1,11 @@
 ---
 interface Props {
   title: string;
+  wide?: boolean;
 }
 
-const { title } = Astro.props;
+const { title, wide = false } = Astro.props;
+const maxWidth = wide ? "max-w-4xl" : "max-w-2xl";
 ---
 
 <!doctype html>
@@ -16,14 +18,16 @@ const { title } = Astro.props;
   </head>
   <body x-data class="min-h-screen bg-surface-alt text-text antialiased">
     <slot name="header" />
-    <div class="mx-auto max-w-2xl px-4 py-8">
+    <div class:list={["mx-auto px-4 py-8", maxWidth]}>
       <slot />
     </div>
     <script>
       import Alpine from "alpinejs";
       import { registerStore } from "../scripts/pipeline";
+      import { registerUsageData } from "../scripts/usage";
 
       registerStore(Alpine);
+      registerUsageData(Alpine);
       Alpine.start();
     </script>
   </body>

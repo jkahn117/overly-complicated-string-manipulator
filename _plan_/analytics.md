@@ -550,11 +550,57 @@ WHERE success = true
 GROUP BY opName, stepType;
 ```
 
-For the demo visualization, options include:
-- **DuckDB-WASM in the browser**: query R2 directly from a dashboard page
-- **Workers route**: a `/admin/usage` endpoint that reads R2 objects and returns
-  aggregated JSON for the frontend to render
-- **Observable / Grafana**: point at the R2 bucket for richer dashboards
+For the demo visualization, the chosen approach is:
+- **Workers route + Astro page**: a `GET /admin/usage` endpoint reads R2 objects,
+  decompresses NDJSON, and returns aggregated per-tenant JSON. A standalone
+  `/usage` page renders the data as summary cards + a table.
+
+### Dashboard implementation
+
+**API route** (`src/routes/admin.ts` — `GET /admin/usage`):
+- Lists R2 objects from `USAGE_METRICS` bucket (up to `?limit=50`, max 100)
+- Takes the most recent N objects (lexicographic order ≈ chronological for
+  Pipeline-generated keys)
+- Decompresses gzip via `DecompressionStream`, parses NDJSON lines
+- Unwraps Pipeline's `{ value: <UsageEvent> }` envelope
+- Aggregates in-memory: groups by `tenantId`, computes counts, success rates,
+  average duration, and last-seen timestamp
+- Returns `{ summary, tenants[] }` — see response shape below
+
+**Response shape**:
+
+```typescript
+{
+  summary: {
+    totalEvents: number;
+    totalBuiltin: number;
+    totalCustom: number;
+    uniqueTenants: number;
+  };
+  tenants: Array<{
+    tenantId: string;
+    tenantName: string;
+    builtinSteps: number;
+    customSteps: number;
+    totalSteps: number;
+    successRate: number;        // 0-1
+    avgDurationMs: number;
+    lastSeen: string;           // ISO 8601
+  }>;
+}
+```
+
+**Frontend page** (`web/src/pages/usage.astro` — `/usage`):
+- Standalone Astro page using `Base.astro` layout with `wide` prop
+- Alpine.js `x-data="usageData()"` component, fetches `/admin/usage` on init
+- Summary cards: Total Steps, Builtin Steps, Custom Steps, Active Tenants
+- Table columns: Tenant (name + ID), Builtin, Custom, Total, Success Rate,
+  Avg ms, Last Seen
+- Success rate color-coded: green (≥95%), neutral (80-95%), red (<80%)
+- Loading, error, and empty states consistent with existing components
+- Refresh button for manual reload
+
+**Bindings added**: `USAGE_METRICS` (R2 bucket: `wfp-usage-metrics`)
 
 ---
 

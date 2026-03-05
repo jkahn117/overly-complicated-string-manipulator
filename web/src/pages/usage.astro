@@ -1,0 +1,139 @@
+---
+import Base from "../layouts/Base.astro";
+---
+
+<Base title="Usage Metrics" wide>
+  <!-- Header -->
+  <header slot="header" class="border-b border-primary/20 bg-primary/5 px-4 py-4">
+    <div class="mx-auto flex max-w-4xl items-center justify-between gap-4">
+      <div>
+        <h1 class="text-lg font-bold tracking-tight text-text">Usage Metrics</h1>
+        <p class="mt-0.5 text-xs text-text-muted">
+          Aggregated pipeline execution data per tenant
+        </p>
+      </div>
+      <div class="flex items-center gap-3">
+        <a
+          href="/"
+          class="rounded-md border border-border bg-surface px-3 py-1.5 text-xs font-medium text-text-muted transition-colors hover:text-text"
+        >
+          &larr; Pipeline Editor
+        </a>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main content -->
+  <div
+    x-data="usageData()"
+    x-init="load()"
+    class="w-full"
+  >
+    <!-- Loading state -->
+    <div
+      x-show="loading"
+      x-cloak
+      class="flex items-center justify-center gap-2 py-12 text-sm text-text-muted"
+    >
+      <svg class="h-4 w-4 animate-spin" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+      </svg>
+      Loading usage data...
+    </div>
+
+    <!-- Error state -->
+    <div
+      x-show="error"
+      x-cloak
+      class="rounded-lg border border-danger/30 bg-danger/5 px-4 py-3 text-sm text-danger"
+      x-text="error"
+    ></div>
+
+    <!-- Empty state -->
+    <div
+      x-show="!loading && !error && data && data.summary.totalEvents === 0"
+      x-cloak
+      class="py-12 text-center text-sm text-text-muted"
+    >
+      No usage data yet. Run some pipelines to generate metrics.
+    </div>
+
+    <!-- Data loaded -->
+    <div x-show="!loading && !error && data && data.summary.totalEvents > 0" x-cloak>
+      <!-- Summary cards -->
+      <div class="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <div class="rounded-lg border border-border bg-surface p-4 shadow-sm">
+          <div class="text-2xl font-bold text-text" x-text="data?.summary.totalEvents.toLocaleString()"></div>
+          <div class="mt-1 text-xs text-text-muted">Total Steps</div>
+        </div>
+        <div class="rounded-lg border border-border bg-surface p-4 shadow-sm">
+          <div class="text-2xl font-bold text-text" x-text="data?.summary.totalBuiltin.toLocaleString()"></div>
+          <div class="mt-1 text-xs text-text-muted">Builtin Steps</div>
+        </div>
+        <div class="rounded-lg border border-border bg-surface p-4 shadow-sm">
+          <div class="text-2xl font-bold text-text" x-text="data?.summary.totalCustom.toLocaleString()"></div>
+          <div class="mt-1 text-xs text-text-muted">Custom Steps</div>
+        </div>
+        <div class="rounded-lg border border-border bg-surface p-4 shadow-sm">
+          <div class="text-2xl font-bold text-text" x-text="data?.summary.uniqueTenants"></div>
+          <div class="mt-1 text-xs text-text-muted">Active Tenants</div>
+        </div>
+      </div>
+
+      <!-- Tenant table -->
+      <div class="rounded-lg border border-border bg-surface shadow-sm">
+        <div class="flex items-center justify-between border-b border-border px-4 py-3">
+          <h2 class="text-xs font-medium uppercase tracking-wide text-text-muted">Per-Tenant Breakdown</h2>
+          <button
+            type="button"
+            x-on:click="load()"
+            x-bind:disabled="loading"
+            class="rounded-md border border-border bg-surface-alt px-2.5 py-1 text-xs font-medium text-text-muted transition-colors hover:text-text disabled:opacity-40"
+          >
+            Refresh
+          </button>
+        </div>
+
+        <div class="overflow-x-auto">
+          <table class="w-full text-left text-sm">
+            <thead>
+              <tr class="border-b border-border text-xs uppercase tracking-wide text-text-muted">
+                <th class="px-4 py-2.5 font-medium">Tenant</th>
+                <th class="px-4 py-2.5 font-medium text-right">Builtin</th>
+                <th class="px-4 py-2.5 font-medium text-right">Custom</th>
+                <th class="px-4 py-2.5 font-medium text-right">Total</th>
+                <th class="px-4 py-2.5 font-medium text-right">Success Rate</th>
+                <th class="px-4 py-2.5 font-medium text-right">Avg ms</th>
+                <th class="px-4 py-2.5 font-medium text-right">Last Seen</th>
+              </tr>
+            </thead>
+            <tbody>
+              <template x-for="tenant in data?.tenants" :key="tenant.tenantId">
+                <tr class="border-b border-border last:border-0 hover:bg-surface-alt">
+                  <td class="px-4 py-2.5">
+                    <div class="font-medium text-text" x-text="tenant.tenantName"></div>
+                    <div class="font-mono text-[10px] text-text-muted" x-text="tenant.tenantId"></div>
+                  </td>
+                  <td class="px-4 py-2.5 text-right font-mono text-text" x-text="tenant.builtinSteps.toLocaleString()"></td>
+                  <td class="px-4 py-2.5 text-right font-mono text-text" x-text="tenant.customSteps.toLocaleString()"></td>
+                  <td class="px-4 py-2.5 text-right font-mono font-semibold text-text" x-text="tenant.totalSteps.toLocaleString()"></td>
+                  <td class="px-4 py-2.5 text-right">
+                    <span
+                      x-bind:class="tenant.successRate >= 0.95 ? 'text-success' : tenant.successRate >= 0.8 ? 'text-text' : 'text-danger'"
+                      class="font-mono"
+                      x-text="(tenant.successRate * 100).toFixed(1) + '%'"
+                    ></span>
+                  </td>
+                  <td class="px-4 py-2.5 text-right font-mono text-text-muted" x-text="tenant.avgDurationMs.toFixed(1)"></td>
+                  <td class="px-4 py-2.5 text-right text-xs text-text-muted" x-text="formatTime(tenant.lastSeen)"></td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</Base>
+
