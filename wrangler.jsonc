@@ -45,4 +45,12 @@
 			"binding": "USAGE_PIPELINE",
 		},
 	],
+	"workers_dev": false,
+	"preview_urls": false,
+	"routes": [
+		{
+			"pattern": "strings.cfsa.dev",
+			"custom_domain": true,
+		},
+	],
 }
