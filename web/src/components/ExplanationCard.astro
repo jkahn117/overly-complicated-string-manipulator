@@ -1,0 +1,108 @@
+---
+---
+
+<section
+  x-data="{ open: false }"
+  class="rounded-lg border border-primary/20 bg-primary/5 shadow-sm mb-6"
+>
+  <button
+    x-on:click="open = !open"
+    class="flex w-full items-center justify-between px-4 py-3 text-left transition-colors hover:bg-primary/10"
+  >
+    <div class="flex items-center gap-2">
+      <svg
+        xmlns="http://www.w3.org/2000/svg"
+        width="16"
+        height="16"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        class="text-primary"
+      >
+        <circle cx="12" cy="12" r="10"></circle>
+        <path d="M12 16v-4"></path>
+        <path d="M12 8h.01"></path>
+      </svg>
+      <span class="text-sm font-medium text-text">How does this demo work?</span>
+    </div>
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="2"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      class="text-text-muted transition-transform duration-200"
+      x-bind:class="open ? 'rotate-180' : ''"
+    >
+      <polyline points="6 9 12 15 18 9"></polyline>
+    </svg>
+  </button>
+
+  <div
+    x-show="open"
+    x-cloak
+    x-transition:enter="transition ease-out duration-150"
+    x-transition:enter-start="opacity-0 -translate-y-1"
+    x-transition:enter-end="opacity-100 translate-y-0"
+    x-transition:leave="transition ease-in duration-100"
+    x-transition:leave-start="opacity-100 translate-y-0"
+    x-transition:leave-end="opacity-0 -translate-y-1"
+    class="border-t border-primary/20 px-4 pb-4 pt-3"
+  >
+    <div class="space-y-3 text-xs leading-relaxed text-text-muted">
+      <p>
+        This is an intentionally over-engineered string manipulation tool built to
+        showcase several <strong class="text-text">Cloudflare Developer Platforms</strong> primitives
+        working together. You type in text, build a pipeline of transformation steps, and
+        hit run. Behind the scenes, quite a lot happens.
+      </p>
+
+      <h3 class="text-xs font-semibold text-text">Major pieces</h3>
+      <ul class="list-inside list-disc space-y-1.5">
+        <li>
+          <strong class="text-text">Pipeline editor (user interface)</strong> &mdash; you compose an
+          ordered list of string operations (uppercase, replace, trim, etc.) or write your own
+          custom JavaScript transforms.
+        </li>
+        <li>
+          <strong class="text-text">Workers for Platforms (WfP)</strong> &mdash; custom
+          transforms you write are deployed into a
+          <a href="https://developers.cloudflare.com/cloudflare-for-platforms/workers-for-platforms/how-workers-for-platforms-works/" target="_blank" class="text-primary underline hover:text-primary-hover"><em>dispatch namespace</em></a>,
+          a separate Worker per tenant. This gives each
+          tenant full <strong class="text-text">code-level isolation</strong>: one
+          tenant's buggy or malicious code can never affect another tenant's execution,
+          memory, or CPU limits. For any platform that runs user-supplied code, this is
+          the gold standard for safe multi-tenancy.
+        </li>
+        <li>
+          <strong class="text-text">Dynamic Worker Loader</strong> &mdash; instead of
+          pre-deploying a Worker for every possible pipeline configuration, we
+          <a href="https://developers.cloudflare.com/workers/runtime-apis/bindings/worker-loader/" target="_blank" class="text-primary underline hover:text-primary-hover"><em>generate a Worker module on the fly</em></a>
+          from your pipeline definition and load it into an isolate at execution time. This means the platform can support
+          an infinite number of pipeline combinations without deploying anything new &mdash;
+          just generate and run.
+        </li>
+        <li>
+          <strong class="text-text">Cloudflare Pipelines</strong> &mdash; every step
+          execution emits a lightweight usage event (tenant, operation, duration, success)
+          into a <a href="https://developers.cloudflare.com/pipelines/" class="text-primary underline hover:text-primary-hover" target="_blank" rel="noopener noreferrer">Pipeline</a>.
+          Events are automatically batched and written to R2 as NDJSON, giving us a
+          simple, scalable analytics backbone with zero extra infrastructure.
+          <a href="/usage" class="text-primary underline hover:text-primary-hover">View the usage dashboard &rarr;</a>
+        </li>
+      </ul>
+
+      <p>
+        In short: you get safe tenant isolation, on-demand code execution, and built-in
+        usage tracking. All running on Cloudflare's edge with <em>no servers to manage</em>.
+      </p>
+    </div>
+  </div>
+</section>
