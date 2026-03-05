@@ -262,6 +262,61 @@ describe("pipeline: history tracking", () => {
     expect(result.data).toBe(result.history[2].output);
     expect(result.data).toBe("HELLO!");
   });
+
+  it("includes durationMs in history entries", async () => {
+    const tenantId = await seedTenant({
+      pipeline: {
+        steps: [
+          { type: "builtin", op: "uppercase" },
+          { type: "builtin", op: "trim" },
+        ],
+      },
+    });
+
+    const response = await postPipeline("  hello  ", tenantId);
+
+    expect(response.status).toBe(200);
+    const result: PipelineEnvelope = await response.json();
+
+    for (const entry of result.history) {
+      expect(entry).toHaveProperty("durationMs");
+      expect(typeof entry.durationMs).toBe("number");
+      expect(entry.durationMs).toBeGreaterThanOrEqual(0);
+    }
+  });
+});
+
+describe("analytics isolation", () => {
+  it("generated code does not contain analytics references", async () => {
+    const tenantId = await seedTenant({
+      pipeline: {
+        steps: [
+          { type: "builtin", op: "uppercase" },
+          { type: "builtin", op: "trim" },
+        ],
+      },
+    });
+
+    const response = await SELF.fetch("https://example.com/?include=code", {
+      method: "POST",
+      body: "hello",
+      headers: {
+        "content-type": "text/plain",
+        "x-tenant-id": tenantId,
+      },
+    });
+
+    expect(response.status).toBe(200);
+    const result: PipelineEnvelope = await response.json();
+
+    expect(result.generatedCode).toBeDefined();
+    const code = result.generatedCode!;
+
+    const forbidden = ["USAGE_PIPELINE", "PIPELINE", "analytics", "metrics", "billing"];
+    for (const term of forbidden) {
+      expect(code).not.toContain(term);
+    }
+  });
 });
 
 describe("pipeline: error handling", () => {

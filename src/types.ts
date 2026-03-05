@@ -3,11 +3,7 @@ export type AppVariables = {
   tenant: Tenant;
 };
 
-/** Extends the generated Env with secrets not in wrangler.jsonc. */
-export type Env = Cloudflare.Env & {
-  /** Cloudflare API token with Workers Scripts write permission (wrangler secret). */
-  CF_API_TOKEN: string;
-};
+export type Env = Cloudflare.Env;
 
 export interface AppEnv {
   Bindings: Env;
@@ -60,6 +56,7 @@ export type HistoryEntry = {
   op: string;
   input: string;
   output: string;
+  durationMs?: number;
 };
 
 export type CustomWorkerRecord = {
@@ -80,3 +77,16 @@ export class FlowError extends Error {
     this.name = "FlowError";
   }
 }
+
+/** Usage event emitted to the analytics pipeline for billing. */
+export type UsageEvent = {
+  tenantId: string;
+  tenantName: string;
+  stepType: "builtin" | "custom";
+  opName: string;
+  stepIndex: number;
+  pipelineVersion: string;
+  durationMs: number;
+  success: boolean;
+  timestamp: string;
+};

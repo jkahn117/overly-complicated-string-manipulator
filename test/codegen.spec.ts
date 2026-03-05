@@ -45,6 +45,26 @@ describe("generatePipelineWorkerCode", () => {
     expect(code).toContain('op: "uppercase"');
   });
 
+  it("includes durationMs timing in builtin step history", () => {
+    const pipeline: FlowDefinition = {
+      steps: [{ type: "builtin", op: "uppercase" }],
+    };
+
+    const code = generatePipelineWorkerCode(pipeline, "test-tenant");
+    expect(code).toContain("performance.now()");
+    expect(code).toContain("durationMs: _dur");
+  });
+
+  it("includes durationMs timing in custom step history", () => {
+    const pipeline: FlowDefinition = {
+      steps: [{ type: "custom", workerName: "my-worker" }],
+    };
+
+    const code = generatePipelineWorkerCode(pipeline, "test-tenant");
+    expect(code).toContain("performance.now()");
+    expect(code).toContain("durationMs: _dur");
+  });
+
   it("generates builtin lowercase step", () => {
     const pipeline: FlowDefinition = {
       steps: [{ type: "builtin", op: "lowercase" }],
@@ -185,5 +205,55 @@ describe("generatePipelineWorkerCode", () => {
     const code = generatePipelineWorkerCode(pipeline, "test-tenant");
     expect(code).toContain('typeof binding.transform !== "function"');
     expect(code).toContain("Missing or invalid binding for custom worker");
+  });
+
+  describe("analytics isolation", () => {
+    const forbiddenStrings = [
+      "USAGE_PIPELINE",
+      "PIPELINE",
+      "analytics",
+      "metrics",
+      "billing",
+    ];
+
+    it("generated code must not contain analytics references (builtin-only pipeline)", () => {
+      const pipeline: FlowDefinition = {
+        steps: [
+          { type: "builtin", op: "uppercase" },
+          { type: "builtin", op: "trim" },
+        ],
+      };
+
+      const code = generatePipelineWorkerCode(pipeline, "test-tenant");
+      for (const term of forbiddenStrings) {
+        expect(code).not.toContain(term);
+      }
+    });
+
+    it("generated code must not contain analytics references (custom-only pipeline)", () => {
+      const pipeline: FlowDefinition = {
+        steps: [{ type: "custom", workerName: "my-worker" }],
+      };
+
+      const code = generatePipelineWorkerCode(pipeline, "test-tenant");
+      for (const term of forbiddenStrings) {
+        expect(code).not.toContain(term);
+      }
+    });
+
+    it("generated code must not contain analytics references (mixed pipeline)", () => {
+      const pipeline: FlowDefinition = {
+        steps: [
+          { type: "builtin", op: "uppercase" },
+          { type: "custom", workerName: "my-worker" },
+          { type: "builtin", op: "trim" },
+        ],
+      };
+
+      const code = generatePipelineWorkerCode(pipeline, "test-tenant");
+      for (const term of forbiddenStrings) {
+        expect(code).not.toContain(term);
+      }
+    });
   });
 });

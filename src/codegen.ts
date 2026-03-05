@@ -104,9 +104,11 @@ const generateBuiltinStepBlock = (step: BuiltinStep, index: number): string => {
       // Step ${index}: ${opLabel}
       {
         const input = data;
+        const _t0 = performance.now();
         try {
           ${transform}
-          history.push({ step: ${index}, type: "builtin", op: ${JSON.stringify(step.op)}, input, output: data });
+          const _dur = Math.round(performance.now() - _t0);
+          history.push({ step: ${index}, type: "builtin", op: ${JSON.stringify(step.op)}, input, output: data, durationMs: _dur });
         } catch (err) {
           err.step = ${index};
           err.op = ${JSON.stringify(opLabel)};
@@ -124,6 +126,7 @@ const generateCustomStepBlock = (step: CustomStep, index: number): string => {
       // Step ${index}: ${opLabel} (via RPC)
       {
         const input = data;
+        const _t0 = performance.now();
         try {
           const binding = env[${JSON.stringify(bindingName)}];
           if (!binding || typeof binding.transform !== "function") {
@@ -133,7 +136,8 @@ const generateCustomStepBlock = (step: CustomStep, index: number): string => {
             );
           }
           data = await binding.transform(data);
-          history.push({ step: ${index}, type: "custom", op: ${JSON.stringify(step.workerName)}, input, output: data });
+          const _dur = Math.round(performance.now() - _t0);
+          history.push({ step: ${index}, type: "custom", op: ${JSON.stringify(step.workerName)}, input, output: data, durationMs: _dur });
         } catch (err) {
           err.step = err.step ?? ${index};
           err.op = err.op ?? ${JSON.stringify(opLabel)};

@@ -1,8 +1,8 @@
 # Workers for Platforms — Dynamic Pipeline Execution
 
-A Cloudflare Workers demo that orchestrates tenant request processing through configurable pipelines, with a browser-based pipeline builder UI.
+A Cloudflare Workers demo that orchestrates tenant request processing through configurable pipelines, with a browser-based pipeline builder UI and usage-based analytics.
 
-Users build a pipeline of ordered transformation steps (built-in string operations and custom tenant Workers), execute it against the dispatch worker, and view step-by-step results alongside the generated isolate code.
+Users build a pipeline of ordered transformation steps (built-in string operations and custom tenant Workers), execute it against the dispatch worker, and view step-by-step results alongside the generated isolate code. Every step execution emits a usage event to a Cloudflare Pipeline for billing and analytics — invisible to the customer.
 
 ## How It Works
 
@@ -59,6 +59,9 @@ Browser → POST / (x-tenant-id header, text/plain body)
   → isolate.fetch(): run pipeline, each step transforms the string
      ├── builtin steps: inline JS (toUpperCase, replaceAll, trim, ...)
      └── custom steps: RPC → CustomProxy → DISPATCHER → tenant Worker
+  → Parse response, emit usage events (non-blocking via waitUntil)
+     ├── builtin events: emitted from dispatch worker (index.ts)
+     └── custom events: emitted from CustomProxy (proxy.ts)
   → Return JSON envelope { data, history, generatedCode? }
 ```
 
@@ -100,7 +103,49 @@ curl -X POST "https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT_ID/worke
   -d '{"name": "wfp-dynamics"}'
 ```
 
-Then deploy:
+#### Analytics Pipeline setup
+
+The usage analytics pipeline requires an R2 bucket, a Pipeline stream, sink, and
+pipeline. Create them with wrangler:
+
+```sh
+# 1. Create the R2 bucket
+npx wrangler r2 bucket create wfp-usage-metrics
+
+# 2. Create the stream (ingestion endpoint for Worker binding)
+npx wrangler pipelines streams create usage_events --http-enabled false
+
+# 3. Create the R2 sink (JSON format, 60s roll interval)
+npx wrangler pipelines sinks create usage_sink \
+  --type r2 --bucket wfp-usage-metrics --format json --roll-interval 60
+
+# 4. Create the pipeline connecting stream → sink
+npx wrangler pipelines create usage_pipeline \
+  --sql "INSERT INTO usage_sink SELECT * FROM usage_events"
+```
+
+The stream creation command outputs a stream ID. Update the `pipelines` binding
+in `wrangler.jsonc` with that ID:
+
+```jsonc
+"pipelines": [
+  {
+    "pipeline": "<STREAM_ID>",
+    "binding": "USAGE_PIPELINE"
+  }
+]
+```
+
+Then regenerate types:
+
+```sh
+npx wrangler types
+```
+
+If the `USAGE_PIPELINE` binding is not configured, the worker still functions
+normally — analytics writes are guarded and silently skipped.
+
+#### Deploy
 
 ```sh
 pnpm deploy       # builds frontend + wrangler deploy
@@ -113,19 +158,19 @@ so custom pipeline steps will fail at execution time.
 ### Run Tests
 
 ```sh
-pnpm test         # 52 tests across 4 suites
+pnpm test         # 59 tests across 4 suites
 ```
 
 ## Project Structure
 
 ```
 ├── src/
-│   ├── index.ts           # Hono app: middleware, pipeline execution, asset fallback
-│   ├── types.ts           # PipelineEnvelope, Tenant, CustomWorkerRecord, FlowError
+│   ├── index.ts           # Hono app: middleware, pipeline execution, analytics emission
+│   ├── types.ts           # PipelineEnvelope, Tenant, UsageEvent, FlowError
 │   ├── middleware.ts       # Tenant resolution from x-tenant-id header + KV
-│   ��── codegen.ts         # Generates pipeline Worker code (builtin + custom steps)
+��   ├── codegen.ts         # Generates pipeline Worker code (builtin + custom steps)
 │   ├── dispatch.ts        # WfP REST API client (deploy/delete scripts in dispatch namespace)
-│   ├── proxy.ts           # CustomProxy WorkerEntrypoint (RPC → dispatch namespace)
+│   ├── proxy.ts           # CustomProxy WorkerEntrypoint (RPC → dispatch + analytics)
 │   └── routes/
 │       ├── admin.ts       # POST /admin/tenants (create tenant)
 │       └── workers.ts     # Custom worker CRUD (list, get, create, update, delete)
@@ -139,11 +184,11 @@ pnpm test         # 52 tests across 4 suites
 │   │   └── styles/global.css     # Tailwind v4 + design tokens
 │   └── astro.config.mjs          # Static output to ../dist/
 ├── test/
-│   ├── index.spec.ts      # Pipeline execution (13 tests)
+│   ├── index.spec.ts      # Pipeline execution + analytics isolation (15 tests)
 │   ├── admin.spec.ts      # Admin routes (6 tests)
 │   ├── workers.spec.ts    # Worker CRUD (16 tests)
-│   └── codegen.spec.ts    # Code generation (17 tests)
-├── wrangler.jsonc         # Bindings: KV, DISPATCHER, LOADER, ASSETS
+│   └── codegen.spec.ts    # Code generation + analytics isolation (22 tests)
+├── wrangler.jsonc         # Bindings: KV, DISPATCHER, LOADER, ASSETS, USAGE_PIPELINE
 ├── pnpm-workspace.yaml    # Workspace: root + web/
 └── package.json           # Scripts: dev, build:web, deploy, test
 ```
@@ -156,6 +201,7 @@ pnpm test         # 52 tests across 4 suites
 | `DISPATCHER` | Dispatch Namespace | Routes to custom tenant Workers at runtime |
 | `LOADER` | Worker Loader | Loads dynamically generated pipeline isolates |
 | `ASSETS` | Assets | Serves the static frontend (with `run_worker_first: true`) |
+| `USAGE_PIPELINE` | Pipeline | Ingests per-step usage events for billing analytics |
 
 ### Environment Variables
 
@@ -278,14 +324,16 @@ The UI is a single-page Astro static site using Alpine.js for reactivity and Tai
 {
   "data": "HELLO BAR!!!",
   "history": [
-    { "step": 0, "type": "builtin", "op": "uppercase", "input": "  hello foo  ", "output": "  HELLO FOO  " },
-    { "step": 1, "type": "builtin", "op": "replace", "input": "  HELLO FOO  ", "output": "  HELLO BAR  " },
-    { "step": 2, "type": "custom", "op": "acme-custom-step", "input": "  HELLO BAR  ", "output": "  HELLO BAR!!!" },
-    { "step": 3, "type": "builtin", "op": "trim", "input": "  HELLO BAR!!!", "output": "HELLO BAR!!!" }
+    { "step": 0, "type": "builtin", "op": "uppercase", "input": "  hello foo  ", "output": "  HELLO FOO  ", "durationMs": 0 },
+    { "step": 1, "type": "builtin", "op": "replace", "input": "  HELLO FOO  ", "output": "  HELLO BAR  ", "durationMs": 0 },
+    { "step": 2, "type": "custom", "op": "acme-custom-step", "input": "  HELLO BAR  ", "output": "  HELLO BAR!!!", "durationMs": 12 },
+    { "step": 3, "type": "builtin", "op": "trim", "input": "  HELLO BAR!!!", "output": "HELLO BAR!!!", "durationMs": 0 }
   ],
   "generatedCode": "..."
 }
 ```
+
+Each history entry includes `durationMs` — the wall-clock time for that step in milliseconds. Builtin steps are typically sub-millisecond; custom steps include the RPC and dispatch overhead.
 
 **Error (500):**
 
@@ -295,13 +343,72 @@ The UI is a single-page Astro static site using Alpine.js for reactivity and Tai
   "step": 2,
   "op": "custom:acme-custom-step",
   "history": [
-    { "step": 0, "type": "builtin", "op": "uppercase", "input": "...", "output": "..." },
-    { "step": 1, "type": "builtin", "op": "replace", "input": "...", "output": "..." }
+    { "step": 0, "type": "builtin", "op": "uppercase", "input": "...", "output": "...", "durationMs": 0 },
+    { "step": 1, "type": "builtin", "op": "replace", "input": "...", "output": "...", "durationMs": 0 }
   ]
 }
 ```
 
 Errors include partial history (steps completed before failure).
+
+## Analytics Pipeline
+
+Every pipeline step execution emits a usage event to a Cloudflare Pipeline, which batches and writes events as NDJSON to an R2 bucket. This models **usage-based pricing** — different cost tiers for builtin vs. custom operations.
+
+### Event schema
+
+Each step produces one record (wrapped as `{ value: <event> }` for the unstructured stream):
+
+```typescript
+type UsageEvent = {
+  tenantId: string;          // e.g. "t_a1b2c3..."
+  tenantName: string;        // e.g. "acme-corp"
+  stepType: "builtin" | "custom";
+  opName: string;            // e.g. "uppercase", "reverse"
+  stepIndex: number;         // position in pipeline (0-based)
+  pipelineVersion: string;   // e.g. "v3"
+  durationMs: number;        // wall-clock time for this step
+  success: boolean;          // false for failed steps
+  timestamp: string;         // ISO 8601
+};
+```
+
+### Where events are emitted
+
+| Step type | Emitted from | Mechanism |
+|-----------|-------------|-----------|
+| Builtin | `index.ts` (dispatch worker) | Iterates history after isolate returns, batches all builtin events into a single `USAGE_PIPELINE.send()` via `waitUntil` |
+| Custom | `proxy.ts` (`CustomProxy`) | Emits one event per `transform()` call in a `finally` block via `waitUntil` |
+
+Both paths use `waitUntil` so the analytics write is non-blocking and does not delay the response to the caller.
+
+### Analytics isolation
+
+The customer never sees analytics code. This is enforced architecturally and by automated tests:
+
+- **Generated code** (`codegen.ts`) contains only pipeline transform logic and `performance.now()` timing. No reference to `USAGE_PIPELINE`, `send()`, or billing.
+- **Isolate env** contains only `TENANT_NAME` and `CUSTOM_*` bindings. `USAGE_PIPELINE` is never injected into the isolate.
+- **Generated code viewer** (`?include=code`) returns the codegen output, which contains no analytics references.
+- **Tests** in `codegen.spec.ts` and `index.spec.ts` assert that generated code does not contain the strings: `USAGE_PIPELINE`, `PIPELINE`, `analytics`, `metrics`, `billing`.
+
+### Querying the data
+
+Events accumulate in the R2 bucket as gzipped NDJSON. Query with DuckDB:
+
+```sql
+-- Per-tenant billing estimate
+SELECT
+  tenantId, tenantName,
+  SUM(CASE WHEN stepType = 'builtin' THEN 1 ELSE 0 END) * 0.0001 AS builtinCost,
+  SUM(CASE WHEN stepType = 'custom'  THEN 1 ELSE 0 END) * 0.00025 AS customCost
+FROM read_json_auto('s3://wfp-usage-metrics/**/*.json.gz')
+WHERE success = true
+GROUP BY tenantId, tenantName;
+```
+
+### Failure handling
+
+Both successful and failed steps emit events. The `success` field lets the downstream billing system decide whether to charge for failures. Failed steps have `success: false` and `durationMs` captures the time spent before the error.
 
 ## Design Decisions
 
@@ -324,3 +431,7 @@ Errors include partial history (steps completed before failure).
 9. **Auto-create tenant** — The frontend auto-creates the tenant on first use by probing `GET /workers` and calling `POST /admin/tenants` on 404. No manual setup required.
 
 10. **Pipeline short-circuits on error** — If any step fails, the pipeline stops and returns partial history. Each step is wrapped in its own try/catch for precise error attribution.
+
+11. **Analytics in the platform layer** — Usage events are emitted from the dispatch worker (`index.ts`) and `CustomProxy` (`proxy.ts`), never from the generated isolate code. This keeps billing concerns invisible to the customer, avoids leaking the `USAGE_PIPELINE` binding into tenant-visible code, and means billing schema changes never invalidate cached isolates.
+
+12. **Split instrumentation by step type** — Builtin events are emitted after the isolate returns (by iterating the history array). Custom events are emitted inside `CustomProxy.transform()`. This avoids double-counting while giving accurate per-step timing from the right vantage point.

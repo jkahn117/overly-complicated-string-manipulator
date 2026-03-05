@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { except } from "hono/combine";
-import type { AppEnv, CustomStep, FlowDefinition, PipelineEnvelope, Tenant } from "./types";
+import type { AppEnv, CustomStep, FlowDefinition, HistoryEntry, PipelineEnvelope, Tenant, UsageEvent } from "./types";
 import { FlowError } from "./types";
 import { getTenant } from "./middleware";
 import { adminRouter } from "./routes/admin";
@@ -90,9 +90,17 @@ app.post("/", async (c) => {
   const tenantId = c.get("tenantId");
   const ctx = c.executionCtx as ExecutionContext;
   for (const step of customSteps) {
+    const stepIndex = tenant.pipeline.steps.indexOf(step);
     const bindingKey = `CUSTOM_${sanitizeBindingName(step.workerName)}`;
     isolateEnv[bindingKey] = ctx.exports.CustomProxy({
-      props: { tenantId, workerName: step.workerName, allowedWorkers },
+      props: {
+        tenantId,
+        tenantName: tenant.name,
+        workerName: step.workerName,
+        allowedWorkers,
+        stepIndex,
+        pipelineVersion: tenant.pipelineVersion,
+      },
     });
   }
 
@@ -121,6 +129,55 @@ app.post("/", async (c) => {
   const result = (await isolateResponse.json()) as
     | PipelineEnvelope
     | { error: string; step: number; op: string; history: unknown[] };
+
+  // Emit usage events for builtin steps (custom steps handled by CustomProxy)
+  const builtinEvents: Array<{ value: UsageEvent }> = [];
+  const history = "history" in result
+    ? (result.history as HistoryEntry[])
+    : [];
+
+  for (const entry of history) {
+    if (entry.type === "builtin") {
+      builtinEvents.push({
+        value: {
+          tenantId,
+          tenantName: tenant.name,
+          stepType: "builtin",
+          opName: entry.op,
+          stepIndex: entry.step,
+          pipelineVersion: tenant.pipelineVersion,
+          durationMs: entry.durationMs ?? 0,
+          success: true,
+          timestamp: new Date().toISOString(),
+        },
+      });
+    }
+  }
+
+  // For failed pipelines, emit failure event for the builtin step that errored
+  if (!isolateResponse.ok && "step" in result && "op" in result) {
+    const errResult = result as { step: number; op: string };
+    if (errResult.op.startsWith("builtin:")) {
+      builtinEvents.push({
+        value: {
+          tenantId,
+          tenantName: tenant.name,
+          stepType: "builtin",
+          opName: errResult.op.replace(/^builtin:/, ""),
+          stepIndex: errResult.step,
+          pipelineVersion: tenant.pipelineVersion,
+          durationMs: 0,
+          success: false,
+          timestamp: new Date().toISOString(),
+        },
+      });
+    }
+  }
+
+  // Non-blocking write — guard for local dev where binding may not exist
+  if (builtinEvents.length > 0 && c.env.USAGE_PIPELINE) {
+    c.executionCtx.waitUntil(c.env.USAGE_PIPELINE.send(builtinEvents));
+  }
 
   if (!isolateResponse.ok) {
     const errorResult = result as {

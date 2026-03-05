@@ -33,4 +33,10 @@
 			"binding": "LOADER",
 		},
 	],
+	"pipelines": [
+		{
+			"pipeline": "f63112ac46b447668126647eeacefb22",
+			"binding": "USAGE_PIPELINE",
+		},
+	],
 }
